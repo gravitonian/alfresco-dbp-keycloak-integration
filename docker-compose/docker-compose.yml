@@ -1,0 +1,143 @@
+# Using version 2 as 3 does not support resource constraint options (cpu_*, mem_* limits) for non swarm mode in Compose
+version: "2"
+
+services:
+  content:
+      image: alfresco/alfresco-content-repository:6.0.0
+      mem_limit: 1500m
+      environment:
+          CATALINA_OPTS: "
+      		-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005
+      		"
+          JAVA_OPTS: "
+              -Ddb.driver=org.postgresql.Driver
+              -Ddb.username=alfresco
+              -Ddb.password=alfresco
+              -Ddb.url=jdbc:postgresql://postgres:5432/alfresco
+              -Dsolr.host=solr6
+              -Dsolr.port=8983
+              -Dsolr.secureComms=none
+              -Dsolr.base.url=/solr
+              -Dindex.subsystem.name=solr6
+              -Ddeployment.method=DOCKER_COMPOSE
+              -Xms1g -Xmx1g
+              "
+      volumes:
+        - ./data/acs:/usr/local/tomcat/alf_data/
+        - ./acs/alfresco-global.properties:/usr/local/tomcat/shared/classes/alfresco-global.properties
+        - ./acs/log4j.properties:/usr/local/tomcat/webapps/alfresco/WEB-INF/classes/log4j.properties
+      ports:
+        - 8082:8080 # Browser port
+        - 5005:5005 # Remote Debug
+      links:
+        - solr6
+        - postgres:postgres
+      depends_on:
+        - solr6
+        - postgres
+
+  share:
+      image: alfresco/alfresco-share:6.0
+      mem_limit: 1g
+      environment:
+        - REPO_HOST=content
+        - REPO_PORT=8080
+        - "CATALINA_OPTS= -Xms500m -Xmx500m"
+      ports:
+        - 8081:8080
+      links:
+        - content:content
+      depends_on:
+        - content
+
+  solr6:
+      image: alfresco/alfresco-search-services:1.1.1
+      mem_limit: 2500m
+      environment:
+        #Solr needs to know how to register itself with Alfresco
+        - SOLR_ALFRESCO_HOST=content
+        - SOLR_ALFRESCO_PORT=8080
+        #Alfresco needs to know how to call solr
+        - SOLR_SOLR_HOST=solr6
+        - SOLR_SOLR_PORT=8983
+        #Create the default alfresco and archive cores
+        - SOLR_CREATE_ALFRESCO_DEFAULTS=alfresco,archive
+        - "SOLR_JAVA_MEM=-Xms2g -Xmx2g"
+      volumes:
+        - ./data/solr/contentstore:/opt/alfresco-search-services/contentstore/
+        - ./data/solr/data:/opt/alfresco-search-services/data/
+      ports:
+        - 8083:8983 #Browser port
+
+  process:
+    image: alfresco/process-services:1.9.0.1
+    environment:
+      ACTIVITI_DATASOURCE_USERNAME: alfresco
+      ACTIVITI_DATASOURCE_PASSWORD: alfresco
+      ACTIVITI_DATASOURCE_DRIVER: org.postgresql.Driver
+      ACTIVITI_HIBERNATE_DIALECT: org.hibernate.dialect.PostgreSQLDialect
+      ACTIVITI_DATASOURCE_URL: 'jdbc:postgresql://postgres:5432/activiti?characterEncoding=UTF-8'
+      ACTIVITI_CSRF_DISABLED: 'true'
+      ACTIVITI_CORS_ENABLED: 'true'
+      ACTIVITI_ES_SERVER_TYPE: client
+      ACTIVITI_ES_DISCOVERY_HOSTS: elasticsearch:9300
+      ACTIVITI_ES_CLUSTER_NAME: elasticsearch
+    volumes:
+      - ./aps/enterprise-license:/root/.activiti/enterprise-license/:ro
+      - ./aps/transform.lic:/usr/share/tomcat/lib/transform.lic
+      - ./aps/activiti-app.properties:/usr/local/tomcat/lib/activiti-app.properties
+      - ./aps/activiti-ldap.properties:/usr/local/tomcat/lib/activiti-ldap.properties
+      - ./aps/activiti-identity-service.properties:/usr/local/tomcat/lib/activiti-identity-service.properties
+      #- ./aps/log4j.properties:/usr/local/tomcat/webapps/activiti-app/WEB-INF/classes/log4j.properties
+      - ./data/aps:/usr/local/data/
+    ports:
+      - 9080:8080
+    links:
+      - elasticsearch:elasticsearch
+      - postgres:postgres
+    depends_on:
+      - elasticsearch
+      - postgres
+
+  elasticsearch:
+    image: elasticsearch:1.7.3
+
+  postgres:
+    image: postgres:10.1
+    mem_limit: 1500m
+    environment:
+      - POSTGRES_PASSWORD=alfresco
+      - POSTGRES_USER=alfresco
+      - POSTGRES_DB=alfresco
+    command: postgres -c max_connections=300 -c log_min_messages=LOG
+    ports:
+      - 5432:5432
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./docker-postgresql-multiple-databases:/docker-entrypoint-initdb.d
+
+  identity-service:
+    image: jboss/keycloak:3.4.3.Final
+    environment:
+      KEYCLOAK_USER: admin
+      KEYCLOAK_PASSWORD: admin
+      POSTGRES_PORT_5432_TCP_ADDR: postgres
+      POSTGRES_PORT_5432_TCP_PORT: 5432
+      POSTGRES_DATABASE: keycloak
+      POSTGRES_USER: alfresco
+      POSTGRES_PASSWORD: alfresco
+    ports:
+      - 8080:8080
+    depends_on:
+      - postgres
+
+#  ldap:
+#    image: greggigon/apacheds
+#    environment:
+#      - BOOTSTRAP_FILE=/bootstrap/demo.ldif
+#    restart: always
+#    ports:
+#      - 10389:10389
+#    volumes:
+#      - ./data/ldap/data:/data
+#      - ./ldap/bootstrap:/bootstrap

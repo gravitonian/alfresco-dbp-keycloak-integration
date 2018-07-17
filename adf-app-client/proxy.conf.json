@@ -1,0 +1,12 @@
+{
+  "/alfresco": {
+    "target": "http://localhost:8082",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/activiti-app": {
+    "target": "http://localhost:9080",
+    "secure": false,
+    "changeOrigin": true
+  }
+}
